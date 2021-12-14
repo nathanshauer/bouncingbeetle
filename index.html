@@ -184,24 +184,28 @@
           player.setVelocityY(-330);
         }
 
-        // ===> Saves player last position
-        if(player.lastX != player.x || player.lastY != player.y){
-          let user = Moralis.User.current();
+        // ===> Saves player last position in Moralis server
+        if(player.lastX != player.x || player.lastY != player.y){ // if position changes, lets save it
+          let user = Moralis.User.current(); // get current user
 
-          const PlayerPosition = Moralis.Object.extend("PlayerPosition");
-          const playerPosition = new PlayerPosition();
+          const PlayerPosition = Moralis.Object.extend("PlayerPosition"); // Create new class in Moralis server called PlayerPosition
+          const playerPosition = new PlayerPosition(); // Creates instance of PlayerPosition
 
-          playerPosition.set("player",user.get("ethAddress"));
-          playerPosition.set("x",player.x);
-          playerPosition.set("y",player.y)
+          // Saves 3 variables in playerPosition
+          playerPosition.set("player",user.get("ethAddress")); // first the ethereum address
+          playerPosition.set("x",player.x); // then the x position of the player
+          playerPosition.set("y",player.y) // and the y position
 
+          // Since "async function update" is called at every fps, we only want to
+          // save when the position changes, we do that by updating lastX and lastY
+          // and comparing to current player.x and player.y
           player.lastX = player.x;
           player.lastY = player.y;
 
+          // NOTE: away needs the function to be async
+          // Sends data to Moralis server
           await playerPosition.save();
         }
-
-
       }
 
       // Function to add to score if star is collected
