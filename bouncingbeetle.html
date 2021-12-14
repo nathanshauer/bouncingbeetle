@@ -1,0 +1,258 @@
+<!-- The Bouncing Beetle Game Version 0.1 -->
+<html>
+  <head>
+    <title>The Bouncing Beetle</title>
+    <!-- Loading web3 lib -->
+	  <script src="https://cdn.jsdelivr.net/npm/web3@latest/dist/web3.min.js"></script>
+    <!-- Loading Moralis lib: blockchain stuff -->
+    <script src="https://npmcdn.com/moralis@0.0.6/dist/moralis.js"></script>
+    <!-- Loading Phaser lib: for game physics -->
+    <script src="//cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>    
+  </head>
+
+  <body>
+    <!-- Body: where buttons are defined -->
+    <button id="btn-login">Connect Metamask</button>
+    <button id="btn-logout">Logout Metamask</button>
+
+    <!-- Script: where game code is defined -->
+    <script>
+
+      // Connect to Moralis server. This is set up in Moralis website
+      Moralis.initialize("jF5tYAzF6pvNubSY8wI5XGWL04Z4faKwiPqQerYS");
+      Moralis.serverURL = "https://3aloogbx9v5a.usemoralis.com:2053/server";
+
+      // Function to log in wallet
+      async function login() {
+        let user = Moralis.User.current();
+        if (!user) {
+          user = await Moralis.Web3.authenticate();
+        }
+        console.log("logged in user:", user);
+      }
+
+      // Function to log out a certain wallet
+      async function logOut() {
+        await Moralis.User.logOut();
+        console.log("logged out");
+      }
+
+      // Assign log in/out functions to html buttons
+      document.getElementById("btn-login").onclick = login;
+      document.getElementById("btn-logout").onclick = logOut;
+
+      // Phaser library configuration
+      var config = {
+        type: Phaser.AUTO,
+        width: 800,
+        height: 600,
+        physics: {
+        default: 'arcade',
+            arcade: {
+                gravity: { y: 300 },
+                debug: false // set to true to see physics boxes in game
+            }
+        },          
+        scene: {
+            // These 3 functions need to be created later!!
+            preload: preload,
+            create: create,
+            update: update
+        }
+      };
+
+      // Creating phaser instance with the previously set configuration "config"
+      var game = new Phaser.Game(config);
+
+      // Phaser variables to be set later
+      var platforms;
+      var player;
+      var competitors = {};
+      var cursor;     
+      var score = 0;
+      var scoreText;
+      
+      // Function mostly to preload images
+      async function preload (){
+        // Note: "this" is whoever called the function.
+        this.load.image('background', 'assets/BG.png');
+        this.load.image('beetle', 'assets/bet.png');
+        this.load.image('beetle2', 'assets/bet2.png');
+        this.load.image('ground', 'assets/g.png');
+        this.load.image('mush', 'assets/mush.png');
+      }
+
+      // Function that creates the preloaded images and sets their properties
+      async function create (){
+        // ===> Creating game objects
+
+        // Background image
+        this.add.image(400,300, 'background').setScale(0.8);
+
+        // Platforms to jump
+        platforms = this.physics.add.staticGroup();
+        platforms.create(290, 400, 'ground').setScale(0.5).refreshBody();
+        platforms.create(350, 400, 'ground').setScale(0.5).refreshBody();
+        platforms.create(537, 400, 'ground').setScale(0.5).refreshBody();
+        platforms.create(600, 400, 'ground').setScale(0.5).refreshBody();
+        platforms.create(662, 400, 'ground').setScale(0.5).refreshBody();
+
+        // Sprites are two-dimensional images or animations overlaid into a scene. 
+        // They are the non-static elements within a 2D game, moving independently of the background. 
+        // Often used to represent player-controlled characters, props, enemy units, etc.
+        player = this.physics.add.sprite(600, 50, 'beetle2').setScale(0.01).refreshBody();
+
+        // Bouncing of the player
+        player.setBounce(0.2);
+      
+        // So the player does not fly away from screen
+        player.body.setCollideWorldBounds(true); 
+        player.body.onWorldBounds = true;
+
+        // Creating stars (mushrooms). When player touchs then, it increases the score
+        stars = this.physics.add.staticGroup({
+          key: 'mush',
+          repeat: 2,
+          setXY: { x: 200, y: 100, stepX: 150 }
+        });
+
+        // Creates a bomb physics group. If player touches one, it dies
+        bombs = this.physics.add.group();
+
+        // ===> Setting collisions and overlaps
+        this.physics.add.collider(player, platforms); // Stating that player can collide with platforms
+        this.physics.add.overlap(player, stars, collectStar, null, this); // when player overlap stars, calls collectStart function
+        this.physics.add.collider(bombs, platforms); // If bomb touches platform, it bounces        
+        this.physics.add.collider(player, bombs, hitBomb, null, this); // when player touches bomb, calls hitBomb function
+        this.physics.world.on('worldbounds', hitWorldBound, this) // when player touches world bounds, calls hitWorldBound function
+
+        // ===> Commands to move player. cursors = arrow keys; cursors2 = wasd
+        cursors = this.input.keyboard.createCursorKeys();
+        cursors2 = this.input.keyboard.addKeys(
+          {up:Phaser.Input.Keyboard.KeyCodes.W,
+          down:Phaser.Input.Keyboard.KeyCodes.S,
+          left:Phaser.Input.Keyboard.KeyCodes.A,
+          right:Phaser.Input.Keyboard.KeyCodes.D});
+
+        // ===> Creates score text in certain position
+        scoreText = this.add.text(16, 16, 'score: 0', { fontSize: '32px', fill: '#000' });          
+
+        // ===> Subscription to game
+        let user = Moralis.User.current(); // current user
+        let query = new Moralis.Query('PlayerPosition'); // query PlayerPosition in Moralis server
+        let subscription = await query.subscribe(); // object to look for ANYONE to update PlayerPosition in Moralis server
+        subscription.on('create', (plocation) => { // on the creation of ANY new playerPosition on Moralis server
+          if(plocation.get("player") != user.get("ethAddress")){ // if the PlayerPosition we got has different eth address 
+            
+            // NOTE: Not sure this will work for more than 2 players
+
+            // if first time seeing
+            if(competitors[plocation.get("player")] == undefined){ 
+              // create a image seeing the other player
+              competitors[plocation.get("player")] = this.add.image( plocation.get("x"), plocation.get("y"), 'comptetitor').setScale(0.3);
+            }
+            else{
+              // update location of other player
+              competitors[plocation.get("player")].x = plocation.get("x");
+              competitors[plocation.get("player")].y = plocation.get("y");
+            }
+
+            // A bunch of logs
+            console.log("someone moved!")
+            console.log(plocation.get("player"))
+            console.log("new X ", plocation.get("x"))
+            console.log("new Y ", plocation.get("y"))
+          }
+        });
+      }
+
+      // Function that checks at every fps if something happened
+      async function update (){
+         // ===> If keys are pressed, player moves
+        if (cursors.left.isDown || cursors2.left.isDown){
+          player.setVelocityX(-160);
+        }
+        else if (cursors.right.isDown || cursors2.right.isDown){
+          player.setVelocityX(160);
+        }
+        else{
+          player.setVelocityX(0);
+        }
+
+        if ((cursors.up.isDown && player.body.touching.down) || (cursors2.up.isDown && player.body.touching.down)){
+          player.setVelocityY(-330);
+        }
+
+        // ===> Saves player last position
+        if(player.lastX != player.x || player.lastY != player.y){
+          let user = Moralis.User.current();
+
+          const PlayerPosition = Moralis.Object.extend("PlayerPosition");
+          const playerPosition = new PlayerPosition();
+
+          playerPosition.set("player",user.get("ethAddress"));
+          playerPosition.set("x",player.x);
+          playerPosition.set("y",player.y)
+
+          player.lastX = player.x;
+          player.lastY = player.y;
+
+          await playerPosition.save();
+        }
+
+
+      }
+
+      // Function to add to score if star is collected
+      function collectStar (player, star){
+        star.disableBody(true, true);
+
+        //  Add and update the score
+        score += 10;
+        scoreText.setText('Score: ' + score);
+
+        // If all the start are collected, creates a new batch
+        if (stars.countActive(true) === 0){
+          //  A new batch of stars to collect
+          stars.children.iterate(function (child) {
+              child.enableBody(true, child.x, 100, true, true);
+          });
+
+          // Now, cretas a bomb that will bounce the screen
+          // First, gets a position far from player current position
+          var x = (player.x < 400) ? Phaser.Math.Between(400, 800) : Phaser.Math.Between(0, 400);
+
+          // Now, uses this position to start a new bomb
+          var bomb = bombs.create(x, 1, 'beetle').setScale(0.2).refreshBody();
+          bomb.setBounce(1);
+          bomb.setCollideWorldBounds(true);
+          bomb.setVelocity(Phaser.Math.Between(-200, 200), 20);
+          // bomb.allowGravity = false;
+        }
+      }
+
+      // Function to end game and restart from scratch
+      function endGame(gameObject){
+        gameObject.physics.pause();
+        gameOver = true;
+        window.alert("You dead!");          
+        gameObject.registry.destroy(); // destroy registry
+        gameObject.events.off(); // disable all active events
+        gameObject.scene.restart(); // restart current scened
+      }
+
+      // In case hits the bomb, stop the game
+      function hitBomb (player, bomb){
+        endGame(this);
+      }
+
+      // In case hits world bounds, stop the game      
+      function hitWorldBound (body){
+        endGame(this);
+      }
+
+    </script>
+
+  </body>
+
+</html>
