@@ -30,12 +30,14 @@
           user = await Moralis.Web3.authenticate();
         }
         console.log("logged in user:", user);
+        location.reload();
       }
 
       // Function to log out a certain wallet
       async function logOut() {
         await Moralis.User.logOut();
         console.log("logged out");
+        location.reload();
       }
 
       // Assign log in/out functions to html buttons
@@ -63,7 +65,19 @@
       };
 
       // Creating phaser instance with the previously set configuration "config"
-      var game = new Phaser.Game(config);
+      var game;
+
+      // Between parenthesis is an "Immediately Invoked Function Expressions" or "Self Executing Functions".
+      (function launch(){
+        let user = Moralis.User.current();
+        if (!user) {
+          alert("Log in with Metamask to start");
+        } else {
+          console.log("logged in user:", user);
+          console.log("user eth address:", user.get("ethAddress") + " logged in");
+          game = new Phaser.Game(config);
+        }
+      })()
 
       // Phaser variables to be set later
       var platforms;
